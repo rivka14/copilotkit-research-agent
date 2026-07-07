@@ -118,7 +118,7 @@ These cost real debugging time — all workarounds live in `agent/agent.py`
 
 | Symptom | Cause / fix |
 |---|---|
-| ⚠️ quota message in chat | Daily Gemini quota for the current model — switch `GEMINI_MODEL` (see above) |
+| quota message in chat | Daily Gemini quota for the current model — switch `GEMINI_MODEL` (see above) |
 | `INCOMPLETE_STREAM` in browser console | Agent crashed mid-stream — check the uvicorn terminal for a traceback |
 | Approval card says "unknown approval request" | Interrupt payload shape drifted from `parseApprovalPayload` in `app/page.tsx` — keep it in sync with `approve_node` |
 | `Agent 'X' not found after runtime sync` | Agent name must match in **three** places: `LangGraphAGUIAgent(name=...)`, the runtime route's `agents` map, and the `<CopilotKit agent="...">` prop (+ `useInterrupt`'s `agentId`) |
