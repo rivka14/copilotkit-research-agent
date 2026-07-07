@@ -18,19 +18,9 @@ from copilotkit.langgraph import copilotkit_emit_state
 
 logger = logging.getLogger("research_agent")
 
-# Free-tier Gemini quota is 20 requests/day PER MODEL NAME and a research run
-# costs ~5-6 requests. The "-latest" aliases draw from separate quota buckets
-# than the pinned names, so hopping between gemini-flash-lite-latest,
-# gemini-flash-latest, gemini-2.5-flash-lite, ... via GEMINI_MODEL buys extra
-# runs on the same key.
 MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
 
 def _retrying(runnable):
-    """Retry only transient 5xx (Gemini intermittently 503s under load).
-
-    Quota errors (429, raised wrapped in ChatGoogleGenerativeAIError) must NOT
-    be retried — backoff just hangs the run for minutes without helping.
-    """
     return runnable.with_retry(
         retry_if_exception_type=(genai_errors.ServerError,),
         stop_after_attempt=3,
@@ -52,8 +42,6 @@ class ResearchState(CopilotKitState):
 @tool
 def search_web(query: str) -> str:
     """Search the web for information about a query."""
-    # Mock search — the POC has no real search backend, so the LLM answers
-    # from its own knowledge; the tool exists to demo generative UI in chat.
     return (
         f"Top results for '{query}':\n"
         f"1. Overview article covering the key facts about {query}.\n"
@@ -63,8 +51,6 @@ def search_web(query: str) -> str:
 
 
 def _text(content) -> str:
-    """Normalize message content: newer Gemini models (e.g. gemini-3-*) return
-    a list of content parts instead of a plain string."""
     if isinstance(content, str):
         return content
     if isinstance(content, list):
@@ -76,21 +62,6 @@ def _text(content) -> str:
 
 
 def _silent_config(config: RunnableConfig) -> RunnableConfig:
-    """Suppress chat streaming for an LLM call at BOTH SDK layers.
-
-    copilotkit_customize_config only sets 'copilotkit:emit-messages', which the
-    CopilotKit subclass uses to filter events off the wire — but the base
-    ag-ui-langgraph adapter reads a different key ('emit-messages') and still
-    does message bookkeeping. A filtered TEXT_MESSAGE_END then never clears the
-    adapter's in-progress record, and the NEXT streaming node emits
-    TEXT_MESSAGE_CONTENT with the stale id → the runtime kills the stream
-    ("No active text message found"). Setting the base key too keeps the base
-    adapter fully silent so no stale record is ever created.
-    """
-    # Built by hand instead of via copilotkit_customize_config: that helper
-    # MUTATES the passed config's metadata dict in place, which would taint
-    # the node's own `config` — and the manually emitted tool-call events
-    # (dispatched with `config`) would then be filtered out too.
     return {
         **config,
         "metadata": {
@@ -104,8 +75,6 @@ def _silent_config(config: RunnableConfig) -> RunnableConfig:
 
 
 def _snapshot(state: ResearchState, **updates) -> dict:
-    """Full canvas state for intermediate emission — partial dicts would
-    momentarily blank out fields the frontend is already rendering."""
     snap = {
         "topic": state.get("topic", ""),
         "plan": state.get("plan", []),
@@ -118,8 +87,6 @@ def _snapshot(state: ResearchState, **updates) -> dict:
 
 
 async def _fail(state: ResearchState, config: RunnableConfig, exc: Exception) -> dict:
-    """Turn an exception into a graceful end of the run: an uncaught error
-    kills the AG-UI event stream and the frontend only sees a dead socket."""
     logger.exception("Research run failed")
     await copilotkit_emit_state(config, _snapshot(state, status="error"))
 
@@ -146,8 +113,6 @@ async def plan_node(state: ResearchState, config: RunnableConfig) -> dict:
         _snapshot(state, status="planning", topic=topic, plan=[], findings="", summary=""),
     )
 
-    # Silence message streaming: the raw 3-line output is not chat-worthy;
-    # we return a formatted AIMessage below instead.
     silent = _silent_config(config)
     try:
         response = await llm_retrying.ainvoke(
@@ -163,7 +128,7 @@ async def plan_node(state: ResearchState, config: RunnableConfig) -> dict:
             ],
             silent,
         )
-    except Exception as exc:  # noqa: BLE001 — any failure should end the run gracefully
+    except Exception as exc:  # noqa: BLE001
         return await _fail(state, config, exc)
 
     content = _text(response.content)
@@ -185,9 +150,6 @@ async def plan_node(state: ResearchState, config: RunnableConfig) -> dict:
 async def approve_node(state: ResearchState, config: RunnableConfig) -> dict:
     await copilotkit_emit_state(config, _snapshot(state, status="awaiting_approval"))
 
-    # Pauses the graph and surfaces the payload to the frontend (useInterrupt).
-    # Requires the checkpointer; on resume the node re-executes from the top
-    # and interrupt() returns the value passed to resolve() in the UI.
     answer = interrupt(
         {
             "action": "approve_plan",
@@ -220,10 +182,6 @@ async def approve_node(state: ResearchState, config: RunnableConfig) -> dict:
 async def research_node(state: ResearchState, config: RunnableConfig) -> dict:
     await copilotkit_emit_state(config, _snapshot(state, status="researching"))
 
-    # Fully silent: langchain-google-genai streams tool calls in
-    # additional_kwargs.function_call, which ag-ui-langgraph doesn't read
-    # (it only looks at tool_call_chunks) — so streamed tool-call events
-    # never fire with Gemini. We emit them manually in the loop below.
     research_config = _silent_config(config)
 
     llm_with_tools = _retrying(llm.bind_tools([search_web]))
@@ -244,16 +202,6 @@ async def research_node(state: ResearchState, config: RunnableConfig) -> dict:
         while response.tool_calls:
             messages.append(response)
             for tool_call in response.tool_calls:
-                # Emit the tool call so the frontend renders a SearchCard.
-                # Two upstream bugs force this exact form: (1) the adapter only
-                # reads tool_call_chunks from streamed chunks, which
-                # langchain-google-genai leaves empty, so Gemini tool calls
-                # never stream; (2) copilotkit_emit_tool_call dispatches a
-                # "copilotkit_manually_emit_tool_call" event whose handler
-                # builds the TOOL_CALL events but never yields them. The base
-                # adapter's own "manually_emit_tool_call" event works — and
-                # must be dispatched with the unfiltered `config`, not
-                # research_config, or the emit-tool-calls filter eats it.
                 await adispatch_custom_event(
                     "manually_emit_tool_call",
                     {
@@ -275,7 +223,6 @@ async def research_node(state: ResearchState, config: RunnableConfig) -> dict:
 async def summarize_node(state: ResearchState, config: RunnableConfig) -> dict:
     await copilotkit_emit_state(config, _snapshot(state, status="summarizing"))
 
-    # Streams into chat by default — the summary is the chat-facing result.
     try:
         response = await llm_retrying.ainvoke(
             [
@@ -293,8 +240,6 @@ async def summarize_node(state: ResearchState, config: RunnableConfig) -> dict:
         return await _fail(state, config, exc)
 
     summary = _text(response.content)
-    # Same id as the streamed message so the end-of-run snapshot replaces the
-    # streamed bubble instead of duplicating it.
     return {
         "summary": summary,
         "status": "done",
@@ -303,8 +248,6 @@ async def summarize_node(state: ResearchState, config: RunnableConfig) -> dict:
 
 
 def _unless_stopped(next_node: str):
-    """Router: skip the rest of the pipeline after an error or a rejection."""
-
     def route(state: ResearchState) -> str:
         return END if state.get("status") in ("error", "rejected") else next_node
 
