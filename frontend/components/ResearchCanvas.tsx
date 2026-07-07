@@ -2,8 +2,6 @@
 
 import { useCoAgent } from "@copilotkit/react-core";
 
-// Mirror of the agent-side ResearchState (agent/agent.py) — only the fields
-// the UI consumes. Keep names and types in sync with the Python side.
 export type AgentState = {
   topic: string;
   plan: string[];
@@ -25,7 +23,6 @@ const STATUS_LABELS: Record<string, string> = {
   error: "Failed — try again",
 };
 
-// Which pipeline stage each status belongs to, for the step indicator.
 const STAGE_OF_STATUS: Record<string, number> = {
   planning: 0,
   planned: 0,
@@ -52,7 +49,6 @@ export function ResearchCanvas() {
     },
   });
 
-  // State can be briefly undefined while syncing — default everything.
   const topic = state?.topic ?? "";
   const plan = state?.plan ?? [];
   const status = state?.status ?? "";
@@ -101,7 +97,6 @@ export function ResearchCanvas() {
           )}
         </div>
 
-        {/* Pipeline stage indicator */}
         <div className="flex items-center gap-2 mb-8">
           {STAGES.map((label, i) => (
             <div key={label} className="flex items-center gap-2 flex-1">

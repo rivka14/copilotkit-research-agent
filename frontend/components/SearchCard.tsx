@@ -1,8 +1,5 @@
 "use client";
 
-// Generative UI card rendered in chat when the agent calls its backend
-// search_web tool. `query` comes from streamed tool-call args and may be
-// undefined until the args finish arriving.
 export function SearchCard({ query }: { query?: string }) {
   return (
     <div className="flex items-center gap-3 bg-slate-800 text-white rounded-xl p-3 my-2 shadow">

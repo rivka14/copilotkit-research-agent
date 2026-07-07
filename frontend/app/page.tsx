@@ -7,7 +7,6 @@ import { CopilotChat } from "@copilotkit/react-ui";
 import { ResearchCanvas } from "@/components/ResearchCanvas";
 import { SearchCard } from "@/components/SearchCard";
 
-// Shape of the interrupt payload emitted by approve_node (agent/agent.py).
 type ApprovalPayload = {
   action: "approve_plan";
   plan: string[];
@@ -15,8 +14,6 @@ type ApprovalPayload = {
 };
 
 function parseApprovalPayload(value: unknown): ApprovalPayload | null {
-  // The Python adapter JSON-serializes interrupt.value, so it usually
-  // arrives as a string.
   if (typeof value === "string") {
     try {
       value = JSON.parse(value);
@@ -39,9 +36,6 @@ function parseApprovalPayload(value: unknown): ApprovalPayload | null {
 }
 
 export default function Home() {
-  // Generative UI for the BACKEND search_web tool: `available: "disabled"`
-  // registers a render-only tool-call renderer without adding a frontend
-  // handler of the same name (which would collide with the backend tool).
   useCopilotAction({
     name: "search_web",
     description: "Search the web for information about a query.",
@@ -50,10 +44,6 @@ export default function Home() {
     render: ({ args }) => <SearchCard query={args.query} />,
   });
 
-  // Human-in-the-loop: renders in chat when the agent pauses on interrupt();
-  // resolve(...) becomes interrupt()'s return value in approve_node.
-  // agentId is required here: the v2 hook doesn't read the classic
-  // <CopilotKit agent="..."> prop and would look for an agent named "default".
   useInterrupt({
     agentId: "research_agent",
     render: ({ event, resolve }) => {
