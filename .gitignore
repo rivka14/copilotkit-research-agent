@@ -1,0 +1,14 @@
+# Python
+.venv/
+__pycache__/
+agent/.env
+
+# Node / Next.js
+node_modules/
+.next/
+frontend/.env.local
+*.tsbuildinfo
+next-env.d.ts
+
+# OS
+.DS_Store
